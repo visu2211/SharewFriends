@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Management</title>
+</head>
+<body>
+    <h1>Task Management</h1>
+
+    <div>
+        <input type="text" id="task-input" placeholder="Enter a task..." />
+        <button id="submit-task">Add Task</button>
+    </div>
+
+    <h2>Task List</h2>
+    <div id="tasks-list">
+        <p>No tasks added yet.</p>
+    </div>
+
+    <h3>Filter Tasks</h3>
+    <button id="filter-done">Show Done</button>
+    <button id="filter-not-done">Show Not Done</button>
+
+    <script>
+        const taskInput = document.getElementById('task-input');
+        const submitTaskButton = document.getElementById('submit-task');
+        const tasksListDiv = document.getElementById('tasks-list');
+        const filterDoneButton = document.getElementById('filter-done');
+        const filterNotDoneButton = document.getElementById('filter-not-done');
+
+        let tasks = []; // Store tasks in memory
+
+        submitTaskButton.addEventListener('click', async () => {
+            const taskDescription = taskInput.value.trim();
+            if (taskDescription) {
+                const response = await fetch('/add-task', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ task: taskDescription }),
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    tasks.push(data.task);  // Add task to local memory
+                    displayTasks(tasks);  // Update the UI with the new task
+                    taskInput.value = '';  // Clear the input field
+                } else {
+                    alert(`Error: ${data.detail}`);
+                }
+            }
+        });
+
+        async function loadTasks() {
+            const response = await fetch('/get-tasks');
+            const data = await response.json();
+            tasks = data.tasks;
+            displayTasks(tasks);
+        }
+
+        function displayTasks(tasks) {
+            tasksListDiv.innerHTML = '';
+            if (tasks.length === 0) {
+                tasksListDiv.innerHTML = '<p>No tasks added yet.</p>';
+            } else {
+                tasks.forEach(task => {
+                    tasksListDiv.innerHTML += `
+                        <div>
+                            <input type="checkbox" id="task-${task.id}" ${task.done ? 'checked' : ''} onchange="toggleTaskDone('${task.id}')">
+                            <label for="task-${task.id}">${task.task}</label> - ${task.category}
+                        </div>
+                    `;
+                });
+            }
+        }
+
+        filterDoneButton.addEventListener('click', () => {
+            const doneTasks = tasks.filter(task => task.done);
+            displayTasks(doneTasks);
+        });
+
+        filterNotDoneButton.addEventListener('click', () => {
+            const notDoneTasks = tasks.filter(task => !task.done);
+            displayTasks(notDoneTasks);
+        });
+
+        // Load tasks on page load
+        loadTasks();
+
+        async function toggleTaskDone(taskId) {
+            const task = tasks.find(task => task.id === taskId);
+            const response = await fetch(`/update-task/${taskId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ done: !task.done }),
+            });
+            const data = await response.json();
+            if (response.ok) {
+                task.done = data.done;  // Update task status in local memory
+                displayTasks(tasks);  // Re-render tasks list
+            } else {
+                alert(`Error: ${data.detail}`);
+            }
+        }
+    </script>
+</body>
+</html>

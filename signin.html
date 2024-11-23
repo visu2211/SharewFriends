@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In</title>
+</head>
+<body>
+    <h1>Sign In</h1>
+    <form id="signin-form">
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email" required><br><br>
+
+        <label for="password">Password:</label>
+        <input type="password" id="password" name="password" required><br><br>
+
+        <button type="submit">Sign In</button>
+    </form>
+
+    <p id="response"></p>
+
+    <!-- Friends Section -->
+    <h2>Friends</h2>
+    <div id="friends-section">
+        <p><strong>Find a friend by email:</strong></p>
+        <input type="email" id="friend-email" placeholder="Friend's email">
+        <button id="send-friend-request">Send Friend Request</button>
+
+        <h3>Friend Requests</h3>
+        <div id="received-requests">
+            <p>No friend requests received.</p>
+        </div>
+        <div id="sent-requests">
+            <p>No sent friend requests.</p>
+        </div>
+
+        <h3>Friends List</h3>
+        <div id="friends-list">
+            <p>No friends added yet.</p>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('signin-form');
+        const responseDisplay = document.getElementById('response');
+        const sendFriendRequestButton = document.getElementById('send-friend-request');
+        const friendEmailInput = document.getElementById('friend-email');
+        const receivedRequestsDiv = document.getElementById('received-requests');
+        const sentRequestsDiv = document.getElementById('sent-requests');
+        const friendsListDiv = document.getElementById('friends-list');
+
+        let userId = ''; // Placeholder for user ID (to be set after sign-in)
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/auth/signin', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email, password }),
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    responseDisplay.textContent = `Success: ${JSON.stringify(data)}`;
+                    userId = data.user_id;  // Assuming the response contains user ID
+                    loadFriendRequests(userId);
+                    loadFriends(userId); // Load friends after sign-in
+                } else {
+                    responseDisplay.textContent = `Error: ${data.detail}`;
+                }
+            } catch (error) {
+                responseDisplay.textContent = `Error: ${error.message}`;
+            }
+        });
+
+        sendFriendRequestButton.addEventListener('click', async () => {
+            const friendEmail = friendEmailInput.value;
+            if (!friendEmail) {
+                alert("Please enter an email address.");
+                return;
+            }
+
+            try {
+                // Modify the request to include sender_id and receiver_email as query parameters
+                const url = new URL('http://127.0.0.1:8000/friends/request');
+                url.searchParams.append('sender_id', userId);  // Add sender_id to the query
+                url.searchParams.append('receiver_email', friendEmail);  // Add receiver_email to the query
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',  // Keep the content-type as application/json
+                    },
+                    body: JSON.stringify({})  // Since parameters are now in the URL, we don't need to send anything in the body
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    alert("Friend request sent.");
+                    loadFriendRequests(userId);
+                } else {
+                    // Log the error details for better debugging
+                    console.error('Error data:', data);
+                    alert(`Error: ${JSON.stringify(data)}`);
+                }
+            } catch (error) {
+                console.error('Error sending friend request:', error);
+                alert(`Error: ${error.message}`);
+            }
+        });
+
+        async function loadFriendRequests(userId) {
+            try {
+                // Fetch the sent and received friend requests for the user
+                const response = await fetch(`http://127.0.0.1:8000/users/${userId}`);
+                const userData = await response.json();
+
+                if (userData.friend_requests_received && userData.friend_requests_received.length > 0) {
+                    receivedRequestsDiv.innerHTML = '<ul>';
+                    userData.friend_requests_received.forEach(requesterId => {
+                        receivedRequestsDiv.innerHTML += `
+                            <li>
+                                Friend request from ${requesterId} 
+                                <button onclick="acceptFriendRequest('${requesterId}')">Accept</button>
+                                <button onclick="declineFriendRequest('${requesterId}')">Decline</button>
+                            </li>
+                        `;
+                    });
+                    receivedRequestsDiv.innerHTML += '</ul>';
+                } else {
+                    receivedRequestsDiv.innerHTML = '<p>No friend requests received.</p>';
+                }
+
+                if (userData.friend_requests_sent && userData.friend_requests_sent.length > 0) {
+                    sentRequestsDiv.innerHTML = '<ul>';
+                    userData.friend_requests_sent.forEach(receiverId => {
+                        sentRequestsDiv.innerHTML += `
+                            <li>Friend request sent to ${receiverId}</li>
+                        `;
+                    });
+                    sentRequestsDiv.innerHTML += '</ul>';
+                } else {
+                    sentRequestsDiv.innerHTML = '<p>No sent friend requests.</p>';
+                }
+            } catch (error) {
+                alert(`Error loading friend requests: ${error.message}`);
+            }
+        }
+
+        async function loadFriends(userId) {
+            try {
+                // Fetch the friends list for the user
+                const response = await fetch(`http://127.0.0.1:8000/users/${userId}/friends`);
+                const friendsData = await response.json();
+
+                if (friendsData.friends && friendsData.friends.length > 0) {
+                    friendsListDiv.innerHTML = '<ul>';
+                    friendsData.friends.forEach(friend => {
+                        friendsListDiv.innerHTML += `
+                            <li>${friend.name} (${friend.email})</li>
+                        `;
+                    });
+                    friendsListDiv.innerHTML += '</ul>';
+                } else {
+                    friendsListDiv.innerHTML = '<p>No friends added yet.</p>';
+                }
+            } catch (error) {
+                alert(`Error loading friends: ${error.message}`);
+            }
+        }
+
+        async function acceptFriendRequest(friendId) {
+            try {
+                const response = await fetch(`http://127.0.0.1:8000/friends/accept?user_id=${userId}&friend_id=${friendId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    alert("Friend request accepted.");
+                    loadFriendRequests(userId);
+                    loadFriends(userId); // Reload the friends list
+                } else {
+                    alert(`Error: ${JSON.stringify(data)}`);
+                }
+            } catch (error) {
+                console.error('Error accepting friend request:', error);
+                alert(`Error: ${error.message}`);
+            }
+        }
+
+        async function declineFriendRequest(friendId) {
+            try {
+                const response = await fetch(`http://127.0.0.1:8000/friends/decline?user_id=${userId}&friend_id=${friendId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    alert("Friend request declined.");
+                    loadFriendRequests(userId);
+                } else {
+                    alert(`Error: ${JSON.stringify(data)}`);
+                }
+            } catch (error) {
+                console.error('Error declining friend request:', error);
+                alert(`Error: ${error.message}`);
+            }
+        }
+
+    </script>
+</body>
+</html>

@@ -1,12 +1,19 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Request 
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from firebase_admin import auth, firestore
 from firebase_utils import add_task, get_tasks, add_user_to_db, db
-from firebase_utils import add_task, get_tasks, db
-from firebase_admin import firestore
 from gemini import categorize_task
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Change "*" to your frontend domain in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Pydantic models
 class TaskInput(BaseModel):
@@ -50,11 +57,26 @@ def sign_up_user(data: SignUpInput):
 
 @app.post("/auth/signin")
 def sign_in_user(data: SignInInput):
-    """Authenticate user."""
+    """Authenticate user. If the user doesn't exist, create a new user."""
     try:
-        # Validate user email exists
-        user = auth.get_user_by_email(data.email)
-        # Authentication with password happens client-side, so here just return the user ID
+        # Attempt to retrieve the user by email
+        try:
+            user = auth.get_user_by_email(data.email)
+        except auth.UserNotFoundError:
+            # If user does not exist, create a new user (if desired)
+            user = auth.create_user(email=data.email, password=data.password, display_name=data.email.split('@')[0])
+
+            # Optionally, add the new user to Firestore
+            user_data = {
+                "email": data.email,
+                "display_name": user.display_name,
+                "created_at": firestore.SERVER_TIMESTAMP,
+            }
+            add_user_to_db(user.uid, user_data)
+
+            return {"message": "User created and signed in successfully", "user_id": user.uid}
+
+        # If user exists, simply return the user ID
         return {"message": "Sign-in successful", "user_id": user.uid}
     except Exception as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -100,35 +122,79 @@ def get_user_tasks(user_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/friends/request")
-def send_friend_request(sender_id: str, receiver_id: str):
-    """Send a friend request."""
-    sender_ref = db.collection("users").document(sender_id)
-    receiver_ref = db.collection("users").document(receiver_id)
+def send_friend_request(sender_id: str, receiver_email: str):
+    """Send a friend request to a user by email."""
+    try:
+        # Find the receiver user based on the email
+        receiver_ref = db.collection("users").where("email", "==", receiver_email).limit(1).stream()
+        receiver_data = None
+        for user in receiver_ref:
+            receiver_data = user.to_dict()
+            receiver_id = user.id
+            break
+        
+        if receiver_data is None:
+            raise HTTPException(status_code=404, detail="Receiver not found")
 
-    if not receiver_ref.get().exists:
-        raise HTTPException(status_code=404, detail="Receiver does not exist")
+        # Add the sender to the receiver's friend_requests_received
+        sender_ref = db.collection("users").document(sender_id)
+        sender_ref.update({"friend_requests_sent": firestore.ArrayUnion([receiver_id])})
 
-    # Simulate adding the request to both users (customize to use a separate request collection if needed)
-    sender_ref.update({"friend_requests_sent": firestore.ArrayUnion([receiver_id])})
-    receiver_ref.update({"friend_requests_received": firestore.ArrayUnion([sender_id])})
+        # Add the receiver to the sender's friend_requests_sent
+        receiver_ref = db.collection("users").document(receiver_id)
+        receiver_ref.update({"friend_requests_received": firestore.ArrayUnion([sender_id])})
 
-    return {"message": "Friend request sent"}
+        return {"message": "Friend request sent"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/friends/accept")
 def accept_friend_request(user_id: str, friend_id: str):
-    """Accept a friend request."""
-    user_ref = db.collection("users").document(user_id)
-    friend_ref = db.collection("users").document(friend_id)
+    """Accept a friend request and add both users to each other's friends list."""
+    try:
+        user_ref = db.collection("users").document(user_id)
+        friend_ref = db.collection("users").document(friend_id)
 
-    # Add each user to the other's friends list
-    user_ref.update({"friends": firestore.ArrayUnion([friend_id])})
-    friend_ref.update({"friends": firestore.ArrayUnion([user_id])})
+        # Fetch user data
+        user_data = user_ref.get().to_dict()
+        friend_data = friend_ref.get().to_dict()
 
-    # Optionally remove requests from both sides
-    user_ref.update({"friend_requests_received": firestore.ArrayRemove([friend_id])})
-    friend_ref.update({"friend_requests_sent": firestore.ArrayRemove([user_id])})
+        if not user_data or not friend_data:
+            raise HTTPException(status_code=404, detail="User not found")
 
-    return {"message": "Friend added successfully"}
+        # Add friend to user's friend list
+        user_ref.update({"friends": firestore.ArrayUnion([friend_id])})
+        friend_ref.update({"friends": firestore.ArrayUnion([user_id])})
+
+        # Remove the request from both users
+        user_ref.update({"friend_requests_received": firestore.ArrayRemove([friend_id])})
+        friend_ref.update({"friend_requests_sent": firestore.ArrayRemove([user_id])})
+
+        return {"message": "Friend request accepted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/friends/decline")
+def decline_friend_request(user_id: str, friend_id: str):
+    """Decline a friend request and remove it from the pending requests."""
+    try:
+        user_ref = db.collection("users").document(user_id)
+        friend_ref = db.collection("users").document(friend_id)
+
+        # Fetch user data
+        user_data = user_ref.get().to_dict()
+        friend_data = friend_ref.get().to_dict()
+
+        if not user_data or not friend_data:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Remove the request from the user's pending requests
+        user_ref.update({"friend_requests_received": firestore.ArrayRemove([friend_id])})
+        friend_ref.update({"friend_requests_sent": firestore.ArrayRemove([user_id])})
+
+        return {"message": "Friend request declined"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/tasks/friends/{user_id}")
 def get_friends_tasks(user_id: str):
@@ -151,3 +217,25 @@ def get_friends_tasks(user_id: str):
                 all_tasks.append({**task_data, "friend_id": friend_id})
 
     return all_tasks
+
+@app.get("/users/email/{email}")
+def find_user_by_email(email: str):
+    """Search for a user by email."""
+    try:
+        users_ref = db.collection("users")
+        query = users_ref.where("email", "==", email).limit(1)
+        user = query.stream()
+        
+        user_data = None
+        for u in user:
+            user_data = u.to_dict()
+            break
+        
+        if user_data is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        return user_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
