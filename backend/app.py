@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from firebase_admin import auth, firestore
 from firebase_utils import add_task, get_tasks, add_user_to_db, db
 from gemini import categorize_task
+import uuid
 
 app = FastAPI()
 
@@ -238,4 +239,79 @@ def find_user_by_email(email: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# Pydantic model to handle task input
+class Task(BaseModel):
+    task: str
 
+class TaskResponse(BaseModel):
+    id: str
+    task: str
+    category: str
+    done: bool
+
+class UpdateTask(BaseModel):
+    done: bool
+
+
+@app.post("/add-task/", response_model=TaskResponse)
+async def add_task(task: Task):
+    try:
+        # Categorize the task using Gemini
+        category = categorize_task(task.task)
+
+        # Generate a unique task ID and prepare the task data
+        task_id = str(uuid.uuid4())
+        task_data = {
+            "task": task.task,
+            "category": category,
+            "done": False,
+        }
+
+        # Save task to Firestore
+        db.collection('tasks').document(task_id).set(task_data)
+
+        return TaskResponse(id=task_id, task=task.task, category=category, done=False)
+    
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error categorizing or saving task: {str(e)}")
+
+@app.get("/get-tasks/", response_model=list[TaskResponse])
+async def get_tasks():
+    try:
+        tasks_ref = db.collection('tasks')
+        tasks = tasks_ref.stream()
+
+        task_list = []
+        for task in tasks:
+            task_data = task.to_dict()
+            task_list.append(TaskResponse(
+                id=task.id,
+                task=task_data["task"],
+                category=task_data["category"],
+                done=task_data["done"]
+            ))
+
+        return task_list
+    
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error fetching tasks: {str(e)}")
+
+@app.patch("/update-task/{task_id}", response_model=TaskResponse)
+async def update_task(task_id: str, update_data: UpdateTask):
+    try:
+        task_ref = db.collection('tasks').document(task_id)
+        task = task_ref.get()
+        
+        if not task.exists:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        task_data = task.to_dict()
+        task_data["done"] = update_data.done
+
+        # Update task in Firestore
+        task_ref.update(task_data)
+
+        return TaskResponse(id=task_id, task=task_data["task"], category=task_data["category"], done=update_data.done)
+    
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Error updating task: {str(e)}")

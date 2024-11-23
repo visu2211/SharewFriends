@@ -3,109 +3,182 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Task Management</title>
+    <title>Task Manager</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #f4f7fc;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        .form-container {
+            margin-bottom: 20px;
+        }
+
+        .task-list {
+            margin-top: 20px;
+        }
+
+        .task {
+            padding: 10px;
+            margin: 5px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .task .category {
+            font-size: 0.9em;
+            color: #777;
+        }
+
+        .done-btn {
+            background-color: #28a745;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+
+        .done-btn.done {
+            background-color: #6c757d;
+        }
+
+        .add-btn {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
-    <h1>Task Management</h1>
 
-    <div>
-        <input type="text" id="task-input" placeholder="Enter a task..." />
-        <button id="submit-task">Add Task</button>
+    <h1>Task Manager</h1>
+
+    <!-- Add Task Form -->
+    <div class="form-container">
+        <h3>Add Task</h3>
+        <input type="text" id="task-title" placeholder="Enter task title" required>
+        <button class="add-btn" id="add-task-btn">Add Task</button>
     </div>
 
-    <h2>Task List</h2>
-    <div id="tasks-list">
-        <p>No tasks added yet.</p>
+    <!-- Task List -->
+    <div class="task-list" id="task-list">
+        <h3>Your Tasks</h3>
+        <!-- Task items will appear here -->
     </div>
-
-    <h3>Filter Tasks</h3>
-    <button id="filter-done">Show Done</button>
-    <button id="filter-not-done">Show Not Done</button>
 
     <script>
-        const taskInput = document.getElementById('task-input');
-        const submitTaskButton = document.getElementById('submit-task');
-        const tasksListDiv = document.getElementById('tasks-list');
-        const filterDoneButton = document.getElementById('filter-done');
-        const filterNotDoneButton = document.getElementById('filter-not-done');
+        const apiUrl = "http://localhost:8000";  // Update with your FastAPI server URL
 
-        let tasks = []; // Store tasks in memory
+        // Add task to Firestore and categorize it
+        document.getElementById('add-task-btn').addEventListener('click', async () => {
+            const taskTitle = document.getElementById('task-title').value.trim();
+            
+            if (taskTitle === "") {
+                alert("Task title cannot be empty!");
+                return;
+            }
 
-        submitTaskButton.addEventListener('click', async () => {
-            const taskDescription = taskInput.value.trim();
-            if (taskDescription) {
-                const response = await fetch('/add-task', {
-                    method: 'POST',
+            try {
+                const response = await fetch(`${apiUrl}/add-task/`, {
+                    method: "POST",
                     headers: {
-                        'Content-Type': 'application/json',
+                        "Content-Type": "application/json"
                     },
-                    body: JSON.stringify({ task: taskDescription }),
+                    body: JSON.stringify({ task: taskTitle })
                 });
 
-                const data = await response.json();
                 if (response.ok) {
-                    tasks.push(data.task);  // Add task to local memory
-                    displayTasks(tasks);  // Update the UI with the new task
-                    taskInput.value = '';  // Clear the input field
+                    const taskData = await response.json();
+                    displayTask(taskData);
+                    document.getElementById('task-title').value = '';  // Clear input
                 } else {
-                    alert(`Error: ${data.detail}`);
+                    alert("Failed to add task.");
                 }
+            } catch (error) {
+                console.error("Error adding task:", error);
+                alert("An error occurred while adding the task.");
             }
         });
 
-        async function loadTasks() {
-            const response = await fetch('/get-tasks');
-            const data = await response.json();
-            tasks = data.tasks;
-            displayTasks(tasks);
-        }
+        // Fetch and display tasks
+        async function fetchTasks() {
+            try {
+                const response = await fetch(`${apiUrl}/get-tasks/`);
+                const tasks = await response.json();
 
-        function displayTasks(tasks) {
-            tasksListDiv.innerHTML = '';
-            if (tasks.length === 0) {
-                tasksListDiv.innerHTML = '<p>No tasks added yet.</p>';
-            } else {
                 tasks.forEach(task => {
-                    tasksListDiv.innerHTML += `
-                        <div>
-                            <input type="checkbox" id="task-${task.id}" ${task.done ? 'checked' : ''} onchange="toggleTaskDone('${task.id}')">
-                            <label for="task-${task.id}">${task.task}</label> - ${task.category}
-                        </div>
-                    `;
+                    displayTask(task);
                 });
+            } catch (error) {
+                console.error("Error fetching tasks:", error);
             }
         }
 
-        filterDoneButton.addEventListener('click', () => {
-            const doneTasks = tasks.filter(task => task.done);
-            displayTasks(doneTasks);
-        });
+        // Display a task on the page
+        function displayTask(taskData) {
+            const taskList = document.getElementById('task-list');
 
-        filterNotDoneButton.addEventListener('click', () => {
-            const notDoneTasks = tasks.filter(task => !task.done);
-            displayTasks(notDoneTasks);
-        });
+            const taskDiv = document.createElement('div');
+            taskDiv.classList.add('task');
+            taskDiv.id = taskData.id;
 
-        // Load tasks on page load
-        loadTasks();
+            const taskTitle = document.createElement('div');
+            taskTitle.textContent = taskData.task;
+            taskDiv.appendChild(taskTitle);
 
-        async function toggleTaskDone(taskId) {
-            const task = tasks.find(task => task.id === taskId);
-            const response = await fetch(`/update-task/${taskId}`, {
-                method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ done: !task.done }),
-            });
-            const data = await response.json();
-            if (response.ok) {
-                task.done = data.done;  // Update task status in local memory
-                displayTasks(tasks);  // Re-render tasks list
-            } else {
-                alert(`Error: ${data.detail}`);
+            const categoryDiv = document.createElement('div');
+            categoryDiv.classList.add('category');
+            categoryDiv.textContent = `Category: ${taskData.category}`;
+            taskDiv.appendChild(categoryDiv);
+
+            const doneButton = document.createElement('button');
+            doneButton.textContent = taskData.done ? "Mark as Not Done" : "Mark as Done";
+            doneButton.classList.add('done-btn');
+            doneButton.classList.toggle('done', taskData.done);
+            doneButton.addEventListener('click', () => updateTaskStatus(taskData.id, !taskData.done));
+
+            taskDiv.appendChild(doneButton);
+
+            taskList.appendChild(taskDiv);
+        }
+
+        // Update task status (mark as done or not done)
+        async function updateTaskStatus(taskId, doneStatus) {
+            try {
+                const response = await fetch(`${apiUrl}/update-task/${taskId}`, {
+                    method: "PATCH",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ done: doneStatus })
+                });
+
+                if (response.ok) {
+                    const updatedTask = await response.json();
+                    const taskDiv = document.getElementById(taskId);
+                    const doneButton = taskDiv.querySelector('.done-btn');
+                    doneButton.textContent = updatedTask.done ? "Mark as Not Done" : "Mark as Done";
+                    doneButton.classList.toggle('done', updatedTask.done);
+                } else {
+                    alert("Failed to update task.");
+                }
+            } catch (error) {
+                console.error("Error updating task status:", error);
             }
         }
+
+        // Fetch tasks on page load
+        window.onload = fetchTasks;
     </script>
+
 </body>
 </html>
