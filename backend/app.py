@@ -1,7 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from firebase_utils import add_task, get_tasks, db
-from gemini import categorize_task
 from firebase_admin import firestore
 
 app = FastAPI()
@@ -17,28 +16,6 @@ class TaskResponse(BaseModel):
     description: str
     category: str
     status: bool
-
-@app.post("/tasks", response_model=TaskResponse)
-def create_task(task: TaskInput):
-    """Create a new task, categorize it, and save to Firestore."""
-    try:
-        # Categorize the task
-        category = categorize_task(task.description)
-
-        # Prepare task data
-        task_data = {
-            "title": task.title,
-            "description": task.description,
-            "category": category,
-            "status": False,  # Default status (not completed)
-        }
-
-        # Save to Firestore
-        add_task(task.user_id, task_data)
-
-        return {**task_data, "status": False}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/tasks/{user_id}")
 def get_user_tasks(user_id: str):
