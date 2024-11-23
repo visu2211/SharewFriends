@@ -1,7 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
+from firebase_admin import auth, firestore
+from firebase_utils import add_task, get_tasks, add_user_to_db, db
 from firebase_utils import add_task, get_tasks, db
 from firebase_admin import firestore
+from gemini import categorize_task
 
 app = FastAPI()
 
@@ -17,6 +20,76 @@ class TaskResponse(BaseModel):
     category: str
     status: bool
 
+class SignUpInput(BaseModel):
+    email: str
+    password: str
+    display_name: str
+
+class SignInInput(BaseModel):
+    email: str
+    password: str
+
+@app.post("/auth/signup")
+def sign_up_user(data: SignUpInput):
+    """Sign up a new user and add to the database."""
+    try:
+        # Create user in Firebase Authentication
+        user = auth.create_user(email=data.email, password=data.password, display_name=data.display_name)
+        
+        # Add user to Firestore
+        user_data = {
+            "email": data.email,
+            "display_name": data.display_name,
+            "created_at": firestore.SERVER_TIMESTAMP,
+        }
+        add_user_to_db(user.uid, user_data)
+        
+        return {"message": "User created successfully", "user_id": user.uid}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/auth/signin")
+def sign_in_user(data: SignInInput):
+    """Authenticate user."""
+    try:
+        # Validate user email exists
+        user = auth.get_user_by_email(data.email)
+        # Authentication with password happens client-side, so here just return the user ID
+        return {"message": "Sign-in successful", "user_id": user.uid}
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+@app.get("/users/{user_id}")
+def get_user(user_id: str):
+    """Retrieve user details from Firestore."""
+    user_ref = db.collection("users").document(user_id)
+    user = user_ref.get()
+    if not user.exists:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user.to_dict()
+
+@app.post("/tasks", response_model=TaskResponse)
+def create_task(task: TaskInput):
+    """Create a new task, categorize it, and save to Firestore."""
+    try:
+        # Categorize the task
+        category = categorize_task(task.description)
+
+        # Prepare task data
+        task_data = {
+            "title": task.title,
+            "description": task.description,
+            "category": category,
+            "status": False,  # Default status (not completed)
+        }
+
+        # Save to Firestore
+        add_task(task.user_id, task_data)
+
+        return {**task_data, "status": False}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/tasks/{user_id}")
 def get_user_tasks(user_id: str):
     """Retrieve all tasks for a user."""
@@ -25,7 +98,7 @@ def get_user_tasks(user_id: str):
         return tasks
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    
+
 @app.post("/friends/request")
 def send_friend_request(sender_id: str, receiver_id: str):
     """Send a friend request."""
