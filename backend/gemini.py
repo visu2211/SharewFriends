@@ -34,7 +34,3 @@ def categorize_task(task_description):
     }
 
     return json_response
-
-task_description = "go get eggs"
-categorized_task = categorize_task(task_description)
-print(categorized_task)

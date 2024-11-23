@@ -76,7 +76,7 @@
     </div>
 
     <script>
-        const apiUrl = "http://localhost:8000";  // Update with your FastAPI server URL
+        const apiUrl = "http://127.0.0.1:8000"; // Update with your FastAPI server URL
 
         // Add task to Firestore and categorize it
         document.getElementById('add-task-btn').addEventListener('click', async () => {
@@ -99,7 +99,7 @@
                 if (response.ok) {
                     const taskData = await response.json();
                     displayTask(taskData);
-                    document.getElementById('task-title').value = '';  // Clear input
+                    document.getElementById('task-title').value = ''; // Clear input
                 } else {
                     alert("Failed to add task.");
                 }
