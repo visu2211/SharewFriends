@@ -1,1 +1,1 @@
-# SharewFriends
+# Simplicity
